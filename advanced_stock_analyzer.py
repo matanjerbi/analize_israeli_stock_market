@@ -9,48 +9,64 @@ class AdvancedStockAnalyzer:
     def __init__(self, symbol, market_index="^TA125.TA", risk_free_rate=0.04):
         """
         מאתחל את המנתח עם הפרמטרים הבסיסיים
-
-        Parameters:
-        -----------
-        symbol : str
-            סימול המניה
-        market_index : str
-            סימול מדד הייחוס
-        risk_free_rate : float
-            ריבית חסרת סיכון שנתית
         """
-        if not isinstance(risk_free_rate, (int, float)) or risk_free_rate < 0:
-            raise ValueError("risk_free_rate חייב להיות מספר חיובי")
-
         self.symbol = symbol
         self.market_index = market_index
         self.risk_free_rate = risk_free_rate
-        self.stock = yf.Ticker(symbol)
-        self.market = yf.Ticker(market_index)
+
+        # אתחול משתנים
+        self.hist = None
+        self.market_hist = None
+        self.info = {}
+
+        # מדדי סיכון
+        self.beta = np.nan
+        self.alpha = np.nan
+        self.sharpe = np.nan
+        self.treynor = np.nan
+        self.var_95 = np.nan
+        self.max_drawdown = np.nan
+
+        # מדדים פונדמנטליים
+        self.pe_ratio = np.nan
+        self.pb_ratio = np.nan
+        self.ps_ratio = np.nan
+        self.revenue_growth = np.nan
+        self.earnings_growth = np.nan
+        self.profit_margins = np.nan
+        self.operating_margins = np.nan
+        self.debt_to_equity = np.nan
+        self.current_ratio = np.nan
+
+        # מדדי סנטימנט
+        self.technical_sentiment = {}
+        self.trend_strength = {}
 
     def fetch_data(self, period="1y"):
         """מושך את כל הנתונים הנדרשים לניתוח"""
         try:
-            # משיכת נתוני המניה והמדד
+            self.stock = yf.Ticker(self.symbol)
+            self.market = yf.Ticker(self.market_index)
+
+            # משיכת נתונים עם תאריכי מסחר זהים
             self.hist = self.stock.history(period=period)
             self.market_hist = self.market.history(period=period)
 
-            if len(self.hist) == 0:
-                raise ValueError(f"לא נמצאו נתונים עבור המניה {self.symbol}")
-            if len(self.market_hist) == 0:
-                raise ValueError(f"לא נמצאו נתונים עבור המדד {self.market_index}")
-
-            # יישור התאריכים
+            # מציאת תאריכים משותפים
             common_dates = self.hist.index.intersection(self.market_hist.index)
-            if len(common_dates) == 0:
-                raise ValueError("אין תאריכים משותפים בין המניה למדד")
 
-            self.hist = self.hist.loc[common_dates]
-            self.market_hist = self.market_hist.loc[common_dates]
+            # סינון לפי תאריכים משותפים
+            self.hist = self.hist.loc[common_dates].copy()
+            self.market_hist = self.market_hist.loc[common_dates].copy()
+
+            if len(self.hist) < 20:  # מינימום נתונים נדרש
+                raise ValueError(f"אין מספיק נתונים עבור המניה {self.symbol}")
+
+            print(f"נמצאו {len(self.hist)} ימי מסחר משותפים")
 
             # חישוב תשואות
-            self.hist['Returns'] = self.hist['Close'].pct_change()
-            self.market_hist['Returns'] = self.market_hist['Close'].pct_change()
+            self.hist.loc[:, 'Returns'] = self.hist['Close'].pct_change()
+            self.market_hist.loc[:, 'Returns'] = self.market_hist['Close'].pct_change()
 
             try:
                 self.info = self.stock.info
@@ -64,28 +80,36 @@ class AdvancedStockAnalyzer:
     def calculate_technical_indicators(self):
         """מחשב מדדים טכניים מתקדמים"""
         try:
+            # יצירת עותק עמוק של הדאטה
+            self.hist = self.hist.copy()
+
             close_prices = self.hist['Close']
             high_prices = self.hist['High']
             low_prices = self.hist['Low']
             volume = self.hist['Volume']
 
             # מדדי מומנטום
-            self.hist['RSI'] = TechnicalIndicators.RSI(close_prices)
-            self.hist['MACD'], self.hist['MACD_Signal'], self.hist['MACD_Hist'] = \
-                TechnicalIndicators.MACD(close_prices)
+            self.hist.loc[:, 'RSI'] = TechnicalIndicators.RSI(close_prices)
+            macd, signal, hist = TechnicalIndicators.MACD(close_prices)
+            self.hist.loc[:, 'MACD'] = macd
+            self.hist.loc[:, 'MACD_Signal'] = signal
+            self.hist.loc[:, 'MACD_Hist'] = hist
 
             # מדדי תנודתיות
-            self.hist['ATR'] = TechnicalIndicators.ATR(high_prices, low_prices, close_prices)
-            self.hist['BBANDS_Upper'], self.hist['BBANDS_Middle'], self.hist['BBANDS_Lower'] = \
-                TechnicalIndicators.BBANDS(close_prices)
+            self.hist.loc[:, 'ATR'] = TechnicalIndicators.ATR(high_prices, low_prices, close_prices)
+            upper, middle, lower = TechnicalIndicators.BBANDS(close_prices)
+            self.hist.loc[:, 'BBANDS_Upper'] = upper
+            self.hist.loc[:, 'BBANDS_Middle'] = middle
+            self.hist.loc[:, 'BBANDS_Lower'] = lower
 
             # מדדי מגמה
-            self.hist['ADX'] = TechnicalIndicators.ADX(high_prices, low_prices, close_prices)
-            self.hist['AROON_Up'], self.hist['AROON_Down'] = \
-                TechnicalIndicators.AROON(high_prices, low_prices)
+            self.hist.loc[:, 'ADX'] = TechnicalIndicators.ADX(high_prices, low_prices, close_prices)
+            aroon_up, aroon_down = TechnicalIndicators.AROON(high_prices, low_prices)
+            self.hist.loc[:, 'AROON_Up'] = aroon_up
+            self.hist.loc[:, 'AROON_Down'] = aroon_down
 
             # מדדי נפח
-            self.hist['OBV'] = TechnicalIndicators.OBV(close_prices, volume)
+            self.hist.loc[:, 'OBV'] = TechnicalIndicators.OBV(close_prices, volume)
 
         except Exception as e:
             print(f"שגיאה בחישוב אינדיקטורים טכניים: {str(e)}")
@@ -93,35 +117,55 @@ class AdvancedStockAnalyzer:
             for col in ['RSI', 'MACD', 'MACD_Signal', 'MACD_Hist', 'ATR',
                         'BBANDS_Upper', 'BBANDS_Middle', 'BBANDS_Lower',
                         'ADX', 'AROON_Up', 'AROON_Down', 'OBV']:
-                self.hist[col] = np.nan
+                self.hist.loc[:, col] = np.nan
 
     def calculate_risk_metrics(self):
         """מחשב מדדי סיכון מתקדמים"""
         try:
-            # מסנכרן את התאריכים בין המניה למדד
-            common_dates = self.hist.index.intersection(self.market_hist.index)
-            stock_returns = self.hist.loc[common_dates, 'Returns']
-            market_returns = self.market_hist.loc[common_dates, 'Returns']
+            if 'Returns' not in self.hist.columns or 'Returns' not in self.market_hist.columns:
+                self.hist.loc[:, 'Returns'] = self.hist['Close'].pct_change()
+                self.market_hist.loc[:, 'Returns'] = self.market_hist['Close'].pct_change()
 
-            # בטא
-            if len(stock_returns.dropna()) < 2 or len(market_returns.dropna()) < 2:
+            # מצא תאריכים משותפים
+            common_dates = self.hist.index.intersection(self.market_hist.index)
+            if len(common_dates) < 2:
+                raise ValueError("אין מספיק נתונים משותפים למניה ולמדד")
+
+            # השתמש רק בתאריכים המשותפים
+            stock_returns = self.hist.loc[common_dates, 'Returns'].dropna()
+            market_returns = self.market_hist.loc[common_dates, 'Returns'].dropna()
+
+            # בדיקת אורך הנתונים
+            print(f"נתוני מניה: {len(stock_returns)}, נתוני מדד: {len(market_returns)}")
+
+            if len(stock_returns) < 2 or len(market_returns) < 2:
                 raise ValueError("אין מספיק נתונים לחישוב מדדי סיכון")
 
-            covariance = np.cov(stock_returns.dropna(),
-                                market_returns.dropna())[0][1]
-            market_variance = np.var(market_returns.dropna())
+            # וידוא שהמערכים באותו אורך
+            stock_returns = stock_returns.values
+            market_returns = market_returns.values
+
+            if len(stock_returns) != len(market_returns):
+                print("מיישר נתונים לאותו אורך...")
+                min_len = min(len(stock_returns), len(market_returns))
+                stock_returns = stock_returns[-min_len:]
+                market_returns = market_returns[-min_len:]
+
+            # בטא
+            covariance = np.cov(stock_returns, market_returns)[0][1]
+            market_variance = np.var(market_returns)
             self.beta = covariance / market_variance if market_variance != 0 else np.nan
 
             # אלפא
             risk_free_daily = (1 + self.risk_free_rate) ** (1 / 252) - 1
-            market_return = market_returns.mean()
-            stock_return = stock_returns.mean()
+            market_return = np.mean(market_returns)
+            stock_return = np.mean(stock_returns)
             self.alpha = stock_return - (risk_free_daily + self.beta * (market_return - risk_free_daily))
 
             # יחס שארפ
             excess_returns = stock_returns - risk_free_daily
-            self.sharpe = np.sqrt(
-                252) * excess_returns.mean() / excess_returns.std() if excess_returns.std() != 0 else np.nan
+            self.sharpe = np.sqrt(252) * np.mean(excess_returns) / np.std(excess_returns) if np.std(
+                excess_returns) != 0 else np.nan
 
             # מדד טריינור
             if not np.isnan(self.beta) and self.beta != 0:
@@ -130,13 +174,13 @@ class AdvancedStockAnalyzer:
                 self.treynor = np.nan
 
             # Value at Risk (VaR)
-            self.var_95 = np.percentile(stock_returns.dropna(), 5)
+            self.var_95 = np.percentile(stock_returns, 5)
 
             # Maximum Drawdown
             cum_returns = (1 + stock_returns).cumprod()
-            rolling_max = cum_returns.expanding().max()
+            rolling_max = np.maximum.accumulate(cum_returns)
             drawdowns = cum_returns / rolling_max - 1
-            self.max_drawdown = drawdowns.min()
+            self.max_drawdown = np.min(drawdowns)
 
         except Exception as e:
             print(f"שגיאה בחישוב מדדי סיכון: {str(e)}")
@@ -146,10 +190,12 @@ class AdvancedStockAnalyzer:
             self.treynor = np.nan
             self.var_95 = np.nan
             self.max_drawdown = np.nan
-
     def calculate_fundamental_metrics(self):
         """מחשב מדדים פונדמנטליים"""
         try:
+            if not hasattr(self, 'info') or self.info is None:
+                self.info = {}
+
             # מכפילים
             self.pe_ratio = self.info.get('trailingPE', np.nan)
             self.pb_ratio = self.info.get('priceToBook', np.nan)
@@ -227,6 +273,15 @@ class AdvancedStockAnalyzer:
             scores = {}
             reasons = []
 
+            # בדיקה שיש לנו את כל המדדים הנדרשים
+            if not hasattr(self, 'sharpe') or not hasattr(self, 'beta'):
+                self.calculate_risk_metrics()
+
+            if not hasattr(self, 'pe_ratio'):
+                self.calculate_fundamental_metrics()
+
+            if not hasattr(self, 'technical_sentiment'):
+                self.analyze_market_sentiment()
             # === ציון טכני (30%) ===
             technical_score = 0
 
