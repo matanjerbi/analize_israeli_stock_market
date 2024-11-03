@@ -2,11 +2,10 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import pandas as pd
+import yfinance as yf
 import numpy as np
-from ..analyzers.enhanced_stock_analyzer import EnhancedStockAnalyzer
 import logging
-from datetime import datetime
+from ..analyzers.enhanced_stock_analyzer import EnhancedStockAnalyzer
 
 
 class ComparisonTab(ttk.Frame):
@@ -18,7 +17,6 @@ class ComparisonTab(ttk.Frame):
 
     def setup_ui(self):
         """הגדרת ממשק המשתמש"""
-        # יצירת מסגרות
         self.create_input_frame()
         self.create_comparison_frame()
         self.create_charts_frame()
@@ -102,29 +100,14 @@ class ComparisonTab(ttk.Frame):
         charts_frame = ttk.LabelFrame(self, text="השוואה גרפית")
         charts_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # יצירת לשוניות לגרפים שונים
-        self.charts_notebook = ttk.Notebook(charts_frame)
-        self.charts_notebook.pack(fill=tk.BOTH, expand=True)
+        # יצירת Figure לגרפים
+        self.fig = plt.Figure(figsize=(10, 6))
+        self.ax = self.fig.add_subplot(111)
 
-        # גרף מחירים
-        self.price_frame = ttk.Frame(self.charts_notebook)
-        self.charts_notebook.add(self.price_frame, text="מחירים")
+        self.canvas = FigureCanvasTkAgg(self.fig, charts_frame)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        self.fig_price = plt.Figure(figsize=(10, 6))
-        self.ax_price = self.fig_price.add_subplot(111)
-        self.canvas_price = FigureCanvasTkAgg(self.fig_price, self.price_frame)
-        self.canvas_price.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        # גרף תשואות
-        self.returns_frame = ttk.Frame(self.charts_notebook)
-        self.charts_notebook.add(self.returns_frame, text="תשואות")
-
-        self.fig_returns = plt.Figure(figsize=(10, 6))
-        self.ax_returns = self.fig_returns.add_subplot(111)
-        self.canvas_returns = FigureCanvasTkAgg(self.fig_returns, self.returns_frame)
-        self.canvas_returns.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-    async def add_stock(self):
+    def add_stock(self):
         """הוספת מניה להשוואה"""
         symbol = self.symbol_entry.get().strip()
         if not symbol:
@@ -138,7 +121,17 @@ class ComparisonTab(ttk.Frame):
         try:
             # יצירת מנתח חדש
             analyzer = EnhancedStockAnalyzer(symbol)
-            await analyzer.fetch_all_data()
+
+            # משיכת נתונים
+            period = self.period_var.get()
+            stock = yf.Ticker(symbol)
+            analyzer.hist = stock.history(period=period)
+
+            if len(analyzer.hist) == 0:
+                raise ValueError(f"לא נמצאו נתונים עבור {symbol}")
+
+            # חישוב אינדיקטורים
+            analyzer.calculate_technical_indicators()
 
             # שמירת המנתח
             self.analyzers[symbol] = analyzer
@@ -193,8 +186,8 @@ class ComparisonTab(ttk.Frame):
             volume = analyzer.hist['Volume'].iloc[-1]
 
             # חישוב מדדים
-            risk_metrics = analyzer.calculate_risk_metrics()
             rsi = analyzer.hist['RSI'].iloc[-1] if 'RSI' in analyzer.hist else np.nan
+            metrics = analyzer.calculate_risk_metrics()
 
             self.comparison_tree.insert("", tk.END, values=(
                 symbol,
@@ -202,18 +195,15 @@ class ComparisonTab(ttk.Frame):
                 f"{change:.1f}%",
                 f"{volume:,.0f}",
                 f"{rsi:.1f}" if not np.isnan(rsi) else "N/A",
-                f"{risk_metrics.get('beta', np.nan):.2f}",
-                f"{risk_metrics.get('sharpe', np.nan):.2f}",
-                f"{risk_metrics.get('volatility', np.nan):.2f}"
+                f"{metrics.get('beta', np.nan):.2f}",
+                f"{metrics.get('sharpe', np.nan):.2f}",
+                f"{metrics.get('volatility', np.nan):.2f}"
             ))
 
     def update_charts(self):
         """עדכון הגרפים"""
-        # ניקוי גרפים
-        self.ax_price.clear()
-        self.ax_returns.clear()
+        self.ax.clear()
 
-        # עדכון גרף מחירים
         for symbol, analyzer in self.analyzers.items():
             if analyzer.hist is None:
                 continue
@@ -222,38 +212,15 @@ class ComparisonTab(ttk.Frame):
             prices = analyzer.hist['Close']
             normalized_prices = prices / prices.iloc[0] * 100
 
-            self.ax_price.plot(analyzer.hist.index, normalized_prices,
-                               label=symbol)
+            self.ax.plot(analyzer.hist.index, normalized_prices,
+                         label=symbol)
 
-        self.ax_price.set_title('השוואת מחירים (מנורמל)')
-        self.ax_price.legend()
-        self.ax_price.grid(True)
+        self.ax.set_title('השוואת מחירים (מנורמל)')
+        self.ax.legend()
+        self.ax.grid(True)
 
-        # עדכון גרף תשואות
-        for symbol, analyzer in self.analyzers.items():
-            if analyzer.hist is None:
-                continue
+        # רוטציה של התאריכים בציר X
+        self.ax.tick_params(axis='x', rotation=45)
 
-            returns = analyzer.hist['Close'].pct_change().cumsum() * 100
-            self.ax_returns.plot(analyzer.hist.index, returns,
-                                 label=symbol)
-
-        self.ax_returns.set_title('תשואה מצטברת')
-        self.ax_returns.legend()
-        self.ax_returns.grid(True)
-
-        # רענון הגרפים
-        self.canvas_price.draw()
-        self.canvas_returns.draw()
-
-    def calculate_correlations(self):
-        """חישוב מטריצת קורלציות"""
-        returns_data = {}
-
-        for symbol, analyzer in self.analyzers.items():
-            if analyzer.hist is not None:
-                returns_data[symbol] = analyzer.hist['Close'].pct_change()
-
-        if returns_data:
-            return pd.DataFrame(returns_data).corr()
-        return pd.DataFrame()
+        # עדכון הגרף
+        self.canvas.draw()

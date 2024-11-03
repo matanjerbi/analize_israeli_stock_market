@@ -8,6 +8,7 @@ from datetime import datetime
 import yfinance as yf
 import numpy as np
 import pandas as pd
+from tkinter import filedialog  # הוסף את זה לייבוא בתחילת הקובץ
 
 
 class AnalysisTab(ttk.Frame):
@@ -60,7 +61,7 @@ class AnalysisTab(ttk.Frame):
         period_menu = ttk.OptionMenu(input_frame, self.period_var, *period_choices)
         period_menu.pack(pady=2)
 
-        # כפתורים
+        # כפתורים - החלף את זה
         buttons_frame = ttk.Frame(input_frame)
         buttons_frame.pack(fill=tk.X, pady=5)
 
@@ -68,9 +69,48 @@ class AnalysisTab(ttk.Frame):
                    command=self.run_analysis).pack(side=tk.LEFT, padx=5)
         ttk.Button(buttons_frame, text="נקה נתונים",
                    command=self.clear_data).pack(side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="ייצא לאקסל",
+                   command=self.export_to_excel).pack(side=tk.LEFT, padx=5)
 
         # לוג
         self.create_log_area(input_frame)
+
+    def export_to_excel(self):
+        """ייצוא הניתוח לאקסל"""
+        if not self.analyzer or not hasattr(self.analyzer, 'hist'):
+            messagebox.showwarning("שגיאה", "אנא בצע ניתוח לפני הייצוא")
+            return
+
+        try:
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx")],
+                title="שמור קובץ אקסל"
+            )
+
+            if not filename:  # המשתמש ביטל את הבחירה
+                return
+
+            self.log_message(f"מתחיל ייצוא לקובץ {filename}")
+
+            # בדיקה שהקובץ לא פתוח
+            try:
+                with open(filename, 'a') as test_file:
+                    pass
+            except:
+                raise IOError("הקובץ פתוח בתוכנה אחרת. אנא סגור אותו ונסה שוב.")
+
+            # ניסיון ייצוא
+            self.analyzer.export_to_excel(filename)
+
+            self.log_message("הייצוא הושלם בהצלחה")
+            messagebox.showinfo("הצלחה", f"הניתוח יוצא בהצלחה לקובץ:\n{filename}")
+
+        except Exception as e:
+            error_msg = f"שגיאה בייצוא לאקסל: {str(e)}"
+            self.log_message(error_msg)
+            messagebox.showerror("שגיאה", error_msg)
+            self.logger.error(error_msg)
 
     def create_log_area(self, parent):
         """יצירת אזור הלוג"""

@@ -334,34 +334,54 @@ class EnhancedStockAnalyzer:
 
     def export_to_excel(self, filename: str):
         """ייצוא הניתוח לאקסל"""
-        with pd.ExcelWriter(filename) as writer:
-            # נתונים היסטוריים
-            if self.hist is not None:
-                self.hist.to_excel(writer, sheet_name='Historical Data')
+        try:
+            self.logger.info(f"Starting export to {filename}")
 
-            # תבניות טכניות
-            patterns_df = pd.DataFrame([
-                {
-                    "Pattern": p.pattern_type,
-                    "Start Date": p.start_date,
-                    "End Date": p.end_date,
-                    "Confidence": p.confidence,
-                    "Description": p.description
-                }
-                for p in self.technical_patterns
-            ])
-            patterns_df.to_excel(writer, sheet_name='Technical Patterns')
+            if self.hist is None:
+                raise ValueError("No historical data available for export")
 
-            # רמות תמיכה והתנגדות
-            support_resistance_df = pd.DataFrame({
-                "Support Levels": [level["price"] for level in self.support_resistance_levels["support"]],
-                "Resistance Levels": [level["price"] for level in self.support_resistance_levels["resistance"]]
+            # יצירת DataFrames לייצוא
+            export_data = {}
+
+            # נתונים היסטוריים - הסרת אזורי זמן
+            hist_data = self.hist.copy()
+            hist_data.index = hist_data.index.tz_localize(None)  # הסרת אזור זמן
+            export_data['Historical Data'] = hist_data
+            self.logger.info("Historical data prepared")
+
+            # אינדיקטורים טכניים
+            tech_columns = ['RSI', 'MACD', 'MACD_Signal', 'ATR']
+            tech_data = hist_data[[col for col in tech_columns if col in hist_data.columns]].copy()
+            export_data['Technical Indicators'] = tech_data
+            self.logger.info("Technical indicators prepared")
+
+            # סיכום והמלצות
+            results = self.calculate_final_score()
+            summary_data = pd.DataFrame({
+                'Metric': ['המלצה', 'ציון סופי'] +
+                          [f'ציון {k}' for k in results['ציונים_חלקיים'].keys()] +
+                          ['סיבה ' + str(i + 1) for i in range(len(results['סיבות']))],
+                'Value': [results['המלצה'],
+                          f"{results['ציון_סופי']:.2f}"] +
+                         [f"{v:.2f}" for v in results['ציונים_חלקיים'].values()] +
+                         results['סיבות']
             })
-            support_resistance_df.to_excel(writer, sheet_name='Support & Resistance')
+            export_data['Summary'] = summary_data
+            self.logger.info("Summary data prepared")
 
-            # תחזיות
-            predictions_df = pd.DataFrame(self.price_predictions)
-            predictions_df.to_excel(writer, sheet_name='Predictions')
+            # ייצוא כל הדפים
+            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+                for sheet_name, data in export_data.items():
+                    self.logger.info(f"Exporting sheet: {sheet_name}")
+                    data.to_excel(writer, sheet_name=sheet_name)
+                    self.logger.info(f"Successfully exported {sheet_name}")
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error in export_to_excel: {str(e)}")
+            raise ValueError(f"שגיאה בייצוא לאקסל: {str(e)}")
+
 
     def save_analysis(self):
         """שמירת תוצאות הניתוח"""
