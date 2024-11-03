@@ -73,3 +73,34 @@ class TechnicalIndicators:
         aroon_up = ((periods - high_periods) / periods) * 100
         aroon_down = ((periods - low_periods) / periods) * 100
         return aroon_up, aroon_down
+
+    @staticmethod
+    def RSI(close_prices, periods=14):
+        """Calculate Relative Strength Index with performance optimization"""
+        import numpy as np
+
+        delta = np.diff(close_prices)
+        gains = np.where(delta > 0, delta, 0)
+        losses = np.where(delta < 0, -delta, 0)
+
+        # Using exponential moving average for more accurate RSI
+        alpha = 1 / periods
+        gains_ema = pd.Series(gains).ewm(alpha=alpha, adjust=False).mean()
+        losses_ema = pd.Series(losses).ewm(alpha=alpha, adjust=False).mean()
+
+        rs = gains_ema / losses_ema
+        rsi = 100 - (100 / (1 + rs))
+        return pd.Series(rsi, index=close_prices.index[1:])
+
+    # הוספת מדדים חדשים
+    @staticmethod
+    def CMF(high, low, close, volume, periods=20):
+        """Calculate Chaikin Money Flow"""
+        mfm = ((close - low) - (high - close)) / (high - low)
+        mfv = mfm * volume
+        return mfv.rolling(window=periods).sum() / volume.rolling(window=periods).sum()
+
+    @staticmethod
+    def ROC(close_prices, periods=12):
+        """Calculate Rate of Change"""
+        return (close_prices - close_prices.shift(periods)) / close_prices.shift(periods) * 100
